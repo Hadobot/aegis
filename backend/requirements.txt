@@ -1,0 +1,31 @@
+# aegis/requirements.txt
+
+# Core
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+pydantic==2.5.3
+python-dotenv==1.0.0
+
+# LLM
+langchain>=0.1.4,<0.2
+langchain-openai>=0.0.8,<0.1
+langchain-google-genai>=0.0.6,<0.1
+
+# Orchestration
+langgraph>=0.0.20,<0.1
+
+# MCP
+fastmcp==0.1.0
+
+# Vector Store
+qdrant-client==1.7.3
+
+# Embeddings
+sentence-transformers==2.3.1
+
+# Observability
+langsmith>=0.0.83,<0.2
+
+# Utils
+httpx==0.26.0
+aiohttp==3.9.3

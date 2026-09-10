@@ -1,6 +1,68 @@
+'use client'
+
+import { useEffect, useState } from 'react'
 import { ArrowRight, Gauge, Plus, ShieldCheck, Sparkles } from 'lucide-react'
 import type { View } from '@/src/aegis/view-types'
+import type { DashboardMetrics } from '@/src/types'
+import { dashboardService } from '@/src/services'
 import { Button } from './shared'
 
-export function Overview({ onNavigate }: { onNavigate: (view: View) => void }) { return <div className="space-y-7"><section className="hero-panel"><div className="eyebrow"><i /> Runtime control plane</div><h2>Govern AI agents with <em>intentional control.</em></h2><p>Aegis sits between your agents and the world, giving teams a clear operating layer for runtime security, policy enforcement, and accountable decisions.</p><div className="mt-7 flex flex-wrap gap-3"><Button onClick={() => onNavigate('agents')}>Explore agents <ArrowRight size={14} /></Button><Button secondary onClick={() => onNavigate('register')}>Register an agent <Plus size={14} /></Button></div></section><section><div className="section-heading"><div><span className="section-kicker">Capabilities</span><h2>What Aegis gives your team</h2></div><Sparkles size={18} className="text-[var(--accent)]" /></div><div className="capability-grid"><Capability icon={<ShieldCheck size={17} />} title="Runtime security" text="Detect injection, jailbreaks, exfiltration, and role hijacking before they become incidents." /><Capability icon={<Gauge size={17} />} title="Policy decisions" text="Turn signals and context into clear allow, flag, block, or escalate actions." /><Capability icon={<Sparkles size={17} />} title="Accountable operations" text="Give every agent its own context, governance modules, and evidence trail." /></div></section></div> }
-function Capability({ icon, title, text }: { icon: React.ReactNode; title: string; text: string }) { return <article className="capability-card"><div className="icon-tile">{icon}</div><div><h3>{title}</h3><p>{text}</p></div></article> }
+export function Overview({ onNavigate }: { onNavigate: (view: View) => void }) {
+  const [metrics, setMetrics] = useState<DashboardMetrics | null>(null)
+
+  useEffect(() => {
+    dashboardService.getMetrics().then(setMetrics).catch(() => {})
+  }, [])
+
+  return (
+    <div className="space-y-7">
+      <section className="hero-panel">
+        <div className="eyebrow"><i /> Runtime control plane</div>
+        <h2>Govern AI agents with <em>intentional control.</em></h2>
+        <p>Aegis sits between your agents and the world, giving teams a clear operating layer for runtime security, policy enforcement, and accountable decisions.</p>
+        <div className="mt-7 flex flex-wrap gap-3">
+          <Button onClick={() => onNavigate('agents')}>Explore agents <ArrowRight size={14} /></Button>
+          <Button secondary onClick={() => onNavigate('register')}>Register an agent <Plus size={14} /></Button>
+        </div>
+      </section>
+
+      {metrics && (
+        <section>
+          <div className="section-heading">
+            <div>
+              <span className="section-kicker">Live metrics</span>
+              <h2>System at a glance</h2>
+            </div>
+          </div>
+          <div className="capability-grid">
+            <Capability icon={<ShieldCheck size={17} />} title="Total requests" text={`${metrics.totalRequests.toLocaleString()} intercepted`} />
+            <Capability icon={<Gauge size={17} />} title="Threats detected" text={`${metrics.threatsDetected} caught`} />
+            <Capability icon={<ShieldCheck size={17} />} title="Blocked" text={`${metrics.blocked} denied`} />
+            <Capability icon={<Sparkles size={17} />} title="Flagged" text={`${metrics.flagged} reviewed`} />
+            <Capability icon={<Gauge size={17} />} title="Escalated" text={`${metrics.escalated} pending`} />
+            <Capability icon={<ShieldCheck size={17} />} title="Active agents" text={`${metrics.activeAgents} registered`} />
+          </div>
+        </section>
+      )}
+
+      <section>
+        <div className="section-heading">
+          <div>
+            <span className="section-kicker">Capabilities</span>
+            <h2>What Aegis gives your team</h2>
+          </div>
+          <Sparkles size={18} className="text-[var(--accent)]" />
+        </div>
+        <div className="capability-grid">
+          <Capability icon={<ShieldCheck size={17} />} title="Runtime security" text="Detect injection, jailbreaks, exfiltration, and role hijacking before they become incidents." />
+          <Capability icon={<Gauge size={17} />} title="Policy decisions" text="Turn signals and context into clear allow, flag, block, or escalate actions." />
+          <Capability icon={<Sparkles size={17} />} title="Accountable operations" text="Give every agent its own context, governance modules, and evidence trail." />
+        </div>
+      </section>
+    </div>
+  )
+}
+
+function Capability({ icon, title, text }: { icon: React.ReactNode; title: string; text: string }) {
+  return <article className="capability-card"><div className="icon-tile">{icon}</div><div><h3>{title}</h3><p>{text}</p></div></article>
+}

@@ -1,0 +1,46 @@
+services:
+  qdrant:
+    image: qdrant/qdrant:latest
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+
+  aegis-api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    env_file:
+      - ./backend/.env
+    ports:
+      - "8000:8000"
+    environment:
+      - UPSTREAM_LLM_BASE_URL=${UPSTREAM_LLM_BASE_URL}
+      - UPSTREAM_LLM_API_KEY=${UPSTREAM_LLM_API_KEY}
+      - OPENROUTER_DEFAULT_MODEL=${OPENROUTER_DEFAULT_MODEL}
+      - INTERNAL_LLM_API_KEY=${INTERNAL_LLM_API_KEY}
+      - INTERNAL_LLM_BASE_URL=${INTERNAL_LLM_BASE_URL}
+      - INTERNAL_LLM_MODEL=${INTERNAL_LLM_MODEL}
+      - QDRANT_HOST=qdrant
+      - QDRANT_PORT=6333
+      - ENVIRONMENT=development
+    depends_on:
+      - qdrant
+    volumes:
+      - ./backend/logs:/app/logs
+      - ./backend/data:/app/data
+
+  aegis-web:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://aegis-api:8000
+    depends_on:
+      - aegis-api
+
+volumes:
+  qdrant_data:

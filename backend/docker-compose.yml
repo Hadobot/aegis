@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  qdrant:
+    image: qdrant/qdrant:latest
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+
+  aegis-api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - UPSTREAM_LLM_BASE_URL=${UPSTREAM_LLM_BASE_URL}
+      - UPSTREAM_LLM_API_KEY=${UPSTREAM_LLM_API_KEY}
+      - OPENROUTER_DEFAULT_MODEL=${OPENROUTER_DEFAULT_MODEL}
+      - INTERNAL_LLM_API_KEY=${INTERNAL_LLM_API_KEY}
+      - INTERNAL_LLM_BASE_URL=${INTERNAL_LLM_BASE_URL}
+      - INTERNAL_LLM_MODEL=${INTERNAL_LLM_MODEL}
+      - QDRANT_HOST=qdrant
+      - QDRANT_PORT=6333
+      - ENVIRONMENT=development
+    depends_on:
+      - qdrant
+    volumes:
+      - ./logs:/app/logs
+
+volumes:
+  qdrant_data:

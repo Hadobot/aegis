@@ -1,4 +1,4 @@
-export type View = 'overview' | 'agents' | 'register' | 'audit' | 'combos'
+export type View = 'overview' | 'agents' | 'register' | 'audit' | 'combos' | 'escalations'
 
 export type GovernanceConfig = {
   sentry: boolean
@@ -22,6 +22,7 @@ export const viewTitles: Record<View, string> = {
   register: 'Register Agent',
   audit: 'Audit Logs',
   combos: 'Agent Combos',
+  escalations: 'Escalations',
 }
 
 export const governanceModules = [
