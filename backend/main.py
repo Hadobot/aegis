@@ -1,24 +1,38 @@
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse
+from contextlib import asynccontextmanager
 from models.schemas import (
     AnalysisRequest, AnalysisResponse, AuditLog,
-    AgentRegistration, HealthResponse
+    AgentRegistration, AgentRegistrationResponse, HealthResponse,
+    ComboMonitorRequest, MonitoringMode,
 )
 from langgraph_pipeline import AegisPipeline
 from agents.auditor import AuditorAgent
 from agents.shield import ShieldAgent
+from agents.combo_monitor import ComboMonitorAgent
 from services import agent_store, audit_store, combo_store
+from services import proxy_manager
 from datetime import datetime
 import httpx
 import os
 import json
 import time
 
+combo_monitor = ComboMonitorAgent()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    proxy_manager.start_all_existing_proxies()
+    yield
+
+
 app = FastAPI(
     title="Aegis - Enterprise AI Agent Governance Proxy",
     description="Transparent security proxy for LLM applications",
-    version="1.0.0"
+    version="2.0.0",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
@@ -38,23 +52,14 @@ UPSTREAM_LLM_API_KEY = os.getenv("UPSTREAM_LLM_API_KEY", "")
 
 
 # ============================================================
-# PROXY MODE — The real deal
+# PROXY MODE — Main proxy on port 8000
 # ============================================================
 
 @app.api_route("/v1/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
 async def proxy_to_upstream(request: Request, path: str):
-    """
-    Transparent proxy: intercepts all /v1/* calls, runs security,
-    then forwards to real LLM if safe.
-
-    Enterprise just points their base_url to http://localhost:8000/v1
-    """
     start_time = time.time()
-
-    # 0. Extract agent identity from custom header
     agent_id = request.headers.get("x-aegis-agent-id", "unknown")
 
-    # 1. Read the request body
     body = await request.body()
     request_json = {}
     if body:
@@ -63,7 +68,6 @@ async def proxy_to_upstream(request: Request, path: str):
         except json.JSONDecodeError:
             request_json = {}
 
-    # 2. Extract the user prompt from the request
     prompt = ""
     if "messages" in request_json:
         for msg in reversed(request_json["messages"]):
@@ -80,10 +84,8 @@ async def proxy_to_upstream(request: Request, path: str):
                         prompt = p["text"]
                         break
 
-    # 3. Run Sentry (input threat detection)
     sentry_result = await pipeline.sentry.analyze_input(prompt)
 
-    # 4. If threat detected -> block immediately, never hit real LLM
     if sentry_result.get("threat_detected") and sentry_result.get("confidence_score", 0) > 0.7:
         elapsed = time.time() - start_time
         detection_path = sentry_result.get("path", "unknown")
@@ -93,7 +95,7 @@ async def proxy_to_upstream(request: Request, path: str):
             sentry_result=sentry_result,
             shield_result={"violations": [], "confidence_score": 0},
             router_result={"action": "block", "combined_risk": sentry_result["confidence_score"]},
-            agent_id=agent_id
+            agent_id=agent_id,
         )
 
         return JSONResponse(
@@ -105,12 +107,10 @@ async def proxy_to_upstream(request: Request, path: str):
                 "confidence": sentry_result.get("confidence_score"),
                 "detection_path": detection_path,
                 "aegis_latency_ms": round(elapsed * 1000, 1),
-                "message": "Request blocked by Aegis security proxy. Contact your security team."
-            }
+                "message": "Request blocked by Aegis security proxy. Contact your security team.",
+            },
         )
 
-    # 5. Forward to real LLM
-    # Handle base URLs that already include /v1 (e.g., OpenRouter)
     if UPSTREAM_LLM_BASE_URL.rstrip("/").endswith("/v1"):
         upstream_url = f"{UPSTREAM_LLM_BASE_URL.rstrip('/')}/{path}"
     else:
@@ -119,7 +119,7 @@ async def proxy_to_upstream(request: Request, path: str):
     headers["host"] = upstream_url.split("//")[1].split("/")[0]
     if UPSTREAM_LLM_API_KEY:
         headers["authorization"] = f"Bearer {UPSTREAM_LLM_API_KEY}"
-    headers.pop("host", None)  # Remove original host, let httpx set it
+    headers.pop("host", None)
 
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
@@ -128,15 +128,14 @@ async def proxy_to_upstream(request: Request, path: str):
                 url=upstream_url,
                 headers=headers,
                 content=body,
-                params=dict(request.query_params)
+                params=dict(request.query_params),
             )
     except httpx.RequestError as e:
         return JSONResponse(
             status_code=502,
-            content={"error": "upstream_unavailable", "detail": str(e)}
+            content={"error": "upstream_unavailable", "detail": str(e)},
         )
 
-    # 6. Get the LLM response
     llm_response_text = ""
     if upstream_response.status_code == 200:
         try:
@@ -151,10 +150,8 @@ async def proxy_to_upstream(request: Request, path: str):
         except Exception:
             pass
 
-    # 7. Run Shield (output validation)
     shield_result = await shield.validate_output(prompt=prompt, response=llm_response_text)
 
-    # 8. If output has violations -> block the response
     if shield_result.get("violations") and not shield_result.get("safe", True):
         elapsed = time.time() - start_time
 
@@ -163,7 +160,7 @@ async def proxy_to_upstream(request: Request, path: str):
             sentry_result=sentry_result,
             shield_result=shield_result,
             router_result={"action": "block", "combined_risk": shield_result.get("confidence_score", 0)},
-            agent_id=agent_id
+            agent_id=agent_id,
         )
 
         return JSONResponse(
@@ -174,11 +171,10 @@ async def proxy_to_upstream(request: Request, path: str):
                 "violations": shield_result.get("violations", []),
                 "confidence": shield_result.get("confidence_score"),
                 "aegis_latency_ms": round(elapsed * 1000, 1),
-                "message": "LLM response blocked by Aegis. Output contained policy violations."
-            }
+                "message": "LLM response blocked by Aegis. Output contained policy violations.",
+            },
         )
 
-    # 9. Everything safe -> return the real LLM response with Aegis headers
     elapsed = time.time() - start_time
 
     await auditor.log_and_map(
@@ -186,7 +182,7 @@ async def proxy_to_upstream(request: Request, path: str):
         sentry_result=sentry_result,
         shield_result=shield_result,
         router_result={"action": "allow", "combined_risk": 0},
-        agent_id=agent_id
+        agent_id=agent_id,
     )
 
     detection_path = sentry_result.get("path", "unknown")
@@ -200,16 +196,17 @@ async def proxy_to_upstream(request: Request, path: str):
         iter([upstream_response.content]),
         status_code=upstream_response.status_code,
         headers=response_headers,
-        media_type=upstream_response.headers.get("content-type", "application/json")
+        media_type=upstream_response.headers.get("content-type", "application/json"),
     )
 
 
 # ============================================================
-# DIRECT ANALYSIS MODE — For demo and testing
+# HEALTH
 # ============================================================
 
 @app.get("/api/v1/health", response_model=HealthResponse)
 async def health_check():
+    running_proxies = proxy_manager.get_running_proxies()
     return HealthResponse(
         status="healthy",
         timestamp=datetime.utcnow().isoformat(),
@@ -217,17 +214,22 @@ async def health_check():
             "api": "up",
             "qdrant": "up",
             "pipeline": "up",
-            "upstream_llm": "configured" if UPSTREAM_LLM_API_KEY else "not_configured"
-        }
+            "upstream_llm": "configured" if UPSTREAM_LLM_API_KEY else "not_configured",
+            "agent_proxies": f"{len(running_proxies)} running",
+        },
     )
 
+
+# ============================================================
+# DIRECT ANALYSIS MODE
+# ============================================================
 
 @app.post("/api/v1/analyze", response_model=AnalysisResponse)
 async def analyze(request: AnalysisRequest):
     try:
         result = await pipeline.analyze(
             prompt=request.prompt,
-            response=request.response
+            response=request.response,
         )
 
         return AnalysisResponse(
@@ -242,7 +244,7 @@ async def analyze(request: AnalysisRequest):
             compliance_refs=result["compliance_refs"],
             evidence_chunks=result["evidence_chunks"],
             reasoning=result["reasoning"],
-            requires_human_review=result["requires_human_review"]
+            requires_human_review=result["requires_human_review"],
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -256,6 +258,10 @@ async def analyze_prompt(request: AnalysisRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
+# ============================================================
+# AUDIT
+# ============================================================
 
 @app.get("/api/v1/audit/logs")
 async def get_audit_logs(limit: int = 100, offset: int = 0):
@@ -278,17 +284,38 @@ async def get_agent_logs(agent_id: str):
     return {"agent_id": agent_id, "logs": merged}
 
 
+# ============================================================
+# AGENTS — Registration + Per-Agent Proxy
+# ============================================================
+
 @app.post("/api/v1/agents/register")
 async def register_agent(agent: AgentRegistration):
     agent_data = agent.model_dump()
     agent_data["autonomy_level"] = int(agent.autonomy_level)
+
+    proxy_info = proxy_manager.start_agent_proxy(agent.agent_id)
+    agent_data["proxy_url"] = proxy_info["proxy_url"]
+    agent_data["proxy_port"] = proxy_info["port"]
+
     agent_store.upsert(agent.agent_id, agent_data)
-    return {"registered": True, "agent_id": agent.agent_id}
+
+    return {
+        "registered": True,
+        "agent_id": agent.agent_id,
+        "proxy_url": proxy_info["proxy_url"],
+        "proxy_port": proxy_info["port"],
+    }
 
 
 @app.get("/api/v1/agents")
 async def list_agents():
-    return {"agents": agent_store.get_all()}
+    agents = agent_store.get_all()
+    for agent in agents:
+        aid = agent.get("agent_id", "")
+        if not agent.get("proxy_url"):
+            agent["proxy_url"] = proxy_manager.get_agent_proxy_url(aid)
+            agent["proxy_port"] = proxy_manager.get_agent_port(aid) or 0
+    return {"agents": agents}
 
 
 @app.get("/api/v1/agents/{agent_id}")
@@ -296,9 +323,70 @@ async def get_agent(agent_id: str):
     agent = agent_store.get(agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
+    agent["proxy_url"] = proxy_manager.get_agent_proxy_url(agent_id)
+    agent["proxy_port"] = proxy_manager.get_agent_port(agent_id) or 0
     agent_logs = audit_store.get_audit_logs_by_agent(agent_id, limit=50)
     return {"agent": agent, "logs": agent_logs}
 
+
+@app.get("/api/v1/agents/discover")
+async def discover_agents():
+    agents = agent_store.get_all()
+    discovery = []
+    for agent in agents:
+        aid = agent.get("agent_id", "")
+        discovery.append({
+            "agent_id": aid,
+            "name": agent.get("name", ""),
+            "description": agent.get("description", ""),
+            "proxy_url": proxy_manager.get_agent_proxy_url(aid),
+            "proxy_port": proxy_manager.get_agent_port(aid) or 0,
+            "status": "active",
+            "owner": agent.get("owner", ""),
+        })
+    return {"agents": discovery}
+
+
+@app.get("/api/v1/agents/discover/{agent_id}")
+async def discover_agent(agent_id: str):
+    agent = agent_store.get(agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
+    return {
+        "agent_id": agent_id,
+        "name": agent.get("name", ""),
+        "description": agent.get("description", ""),
+        "proxy_url": proxy_manager.get_agent_proxy_url(agent_id),
+        "proxy_port": proxy_manager.get_agent_port(agent_id) or 0,
+        "status": "active",
+        "owner": agent.get("owner", ""),
+    }
+
+
+@app.get("/api/v1/proxies")
+async def list_proxies():
+    return {"proxies": proxy_manager.get_all_proxies()}
+
+
+@app.get("/api/v1/proxies/running")
+async def list_running_proxies():
+    return {"proxies": proxy_manager.get_running_proxies()}
+
+
+@app.post("/api/v1/proxies/{agent_id}/restart")
+async def restart_proxy(agent_id: str):
+    agent = agent_store.get(agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
+    proxy_manager.stop_agent_proxy(agent_id)
+    time.sleep(0.5)
+    result = proxy_manager.start_agent_proxy(agent_id)
+    return result
+
+
+# ============================================================
+# METRICS
+# ============================================================
 
 @app.get("/api/v1/metrics")
 async def get_metrics():
@@ -329,17 +417,61 @@ async def get_combo(combo_id: str):
 async def create_combo(request: Request):
     body = await request.json()
     combo_id = f"combo-{int(time.time()*1000)}"
+
+    connections = body.get("connections", [])
+    normalized_connections = []
+    for conn in connections:
+        normalized_connections.append({
+            "from_agent": conn.get("from_agent", conn.get("from", "")),
+            "to_agent": conn.get("to_agent", conn.get("to", "")),
+            "communication": conn.get("communication", "allowed"),
+            "data_flow": conn.get("data_flow", conn.get("dataFlow", "public")),
+            "actions": conn.get("actions", []),
+            "approval_required": conn.get("approval_required", conn.get("approvalRequired", False)),
+        })
+
     combo = {
         "id": combo_id,
         "name": body.get("name", ""),
         "description": body.get("description", ""),
         "agents": body.get("agents", []),
-        "connections": body.get("connections", []),
+        "connections": normalized_connections,
+        "monitoring_mode": body.get("monitoring_mode", "enforce"),
         "status": "active",
         "createdAt": datetime.utcnow().isoformat(),
     }
     combo_store.upsert(combo_id, combo)
     return combo
+
+
+@app.put("/api/v1/combos/{combo_id}")
+async def update_combo(combo_id: str, request: Request):
+    existing = combo_store.get(combo_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail=f"Combo '{combo_id}' not found")
+
+    body = await request.json()
+    connections = body.get("connections", existing.get("connections", []))
+    normalized_connections = []
+    for conn in connections:
+        normalized_connections.append({
+            "from_agent": conn.get("from_agent", conn.get("from", "")),
+            "to_agent": conn.get("to_agent", conn.get("to", "")),
+            "communication": conn.get("communication", "allowed"),
+            "data_flow": conn.get("data_flow", conn.get("dataFlow", "public")),
+            "actions": conn.get("actions", []),
+            "approval_required": conn.get("approval_required", conn.get("approvalRequired", False)),
+        })
+
+    existing.update({
+        "name": body.get("name", existing.get("name", "")),
+        "description": body.get("description", existing.get("description", "")),
+        "agents": body.get("agents", existing.get("agents", [])),
+        "connections": normalized_connections,
+        "monitoring_mode": body.get("monitoring_mode", existing.get("monitoring_mode", "enforce")),
+    })
+    combo_store.upsert(combo_id, existing)
+    return existing
 
 
 @app.delete("/api/v1/combos/{combo_id}")
@@ -348,6 +480,43 @@ async def delete_combo(combo_id: str):
     if not deleted:
         raise HTTPException(status_code=404, detail=f"Combo '{combo_id}' not found")
     return {"deleted": True}
+
+
+# ============================================================
+# COMBO MONITOR — Agent-to-agent communication guardrails
+# ============================================================
+
+@app.post("/api/v1/combo-monitor/validate")
+async def validate_agent_communication(request: ComboMonitorRequest):
+    combos = combo_store.get_all()
+    result = combo_monitor.validate_communication(
+        from_agent=request.from_agent_id,
+        to_agent=request.to_agent_id,
+        combo_id=request.combo_id,
+        data_flow=request.data_flow.value if request.data_flow else "public",
+        action=request.action or "",
+        combos=combos,
+    )
+    status_code = 200 if result["allowed"] else 403
+    return JSONResponse(status_code=status_code, content=result)
+
+
+@app.get("/api/v1/combo-monitor/violations")
+async def get_combo_violations(combo_id: str = None, limit: int = 100):
+    violations = combo_monitor.get_violations(combo_id=combo_id, limit=limit)
+    return {"violations": violations, "total": combo_monitor.get_violation_count(combo_id)}
+
+
+@app.get("/api/v1/combo-monitor/status")
+async def get_combo_monitor_status():
+    combos = combo_store.get_all()
+    return combo_monitor.get_monitoring_summary(combos)
+
+
+@app.get("/api/v1/combo-monitor/active")
+async def get_active_monitored_combos():
+    combos = combo_store.get_all()
+    return {"combos": combo_monitor.get_active_monitored_combos(combos)}
 
 
 # ============================================================
@@ -406,15 +575,24 @@ async def get_security_agents():
             "eventCount": total,
             "riskLevel": "low",
         },
+        {
+            "id": "combo-monitor",
+            "name": "Combo Monitor",
+            "role": "Agent Communication Guard",
+            "description": "Monitor and enforce guardrails on agent-to-agent communication within combos.",
+            "status": "active",
+            "eventCount": combo_monitor.get_violation_count(),
+            "riskLevel": "medium",
+        },
     ]}
 
 
+# ============================================================
+# ESCALATIONS
+# ============================================================
+
 @app.post("/api/v1/escalate")
 async def escalate_to_human(request: Request):
-    """
-    Escalate a flagged request to human review.
-    In production, this would send to a webhook/SIEM/dashboard.
-    """
     body = await request.json()
 
     escalation = {
@@ -427,7 +605,7 @@ async def escalate_to_human(request: Request):
         "reasoning": body.get("reasoning"),
         "compliance_refs": body.get("compliance_refs", []),
         "status": "pending_review",
-        "assigned_to": None
+        "assigned_to": None,
     }
 
     os.makedirs("logs", exist_ok=True)
@@ -438,13 +616,12 @@ async def escalate_to_human(request: Request):
         "escalated": True,
         "escalation_id": escalation["escalation_id"],
         "message": "Request escalated to human analyst",
-        "status": "pending_review"
+        "status": "pending_review",
     }
 
 
 @app.get("/api/v1/escalations")
 async def get_escalations(limit: int = 50):
-    """Get pending escalations for human review."""
     escalations = audit_store.get_escalations(limit=limit)
     return {"escalations": escalations, "total": audit_store.get_escalations_count()}
 

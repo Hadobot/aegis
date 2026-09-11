@@ -14,6 +14,8 @@ export interface Agent {
   intelEnabled: boolean;
   auditorEnabled: boolean;
   routerEnabled: boolean;
+  proxyUrl?: string;
+  proxyPort?: number;
 }
 
 // Security pipeline types
@@ -90,6 +92,7 @@ export interface KnowledgeDocument {
 // Combo (multi-agent governance)
 export type CommunicationType = 'allowed' | 'conditional' | 'blocked';
 export type DataFlowType = 'public' | 'internal' | 'sensitive' | 'pii' | 'restricted';
+export type MonitoringModeType = 'enforce' | 'monitor';
 
 export interface AgentConnection {
   from: string;
@@ -106,8 +109,48 @@ export interface Combo {
   description: string;
   agents: string[];
   connections: AgentConnection[];
+  monitoringMode?: MonitoringModeType;
   status: 'active' | 'inactive';
   createdAt: Date;
+}
+
+// Combo monitor types
+export interface ComboViolation {
+  violation_id: string;
+  timestamp: string;
+  from_agent: string;
+  to_agent: string;
+  combo_id: string;
+  reason: string;
+  blocked: boolean;
+  connection_ref: Record<string, unknown> | null;
+  data_flow: string;
+  action: string;
+}
+
+export interface ComboMonitorStatus {
+  total_active_combos: number;
+  total_violations: number;
+  total_blocked: number;
+  total_allowed_with_violation: number;
+  combos: Array<{
+    combo_id: string;
+    name: string;
+    monitoring_mode: string;
+    agent_count: number;
+    connection_count: number;
+    violation_count: number;
+  }>;
+}
+
+export interface AgentDiscovery {
+  agent_id: string;
+  name: string;
+  description: string;
+  proxy_url: string;
+  proxy_port: number;
+  status: string;
+  owner: string;
 }
 
 // Analysis request/response
@@ -165,6 +208,8 @@ export interface BackendAgentRegistration {
   allowed_tools: string[];
   allowed_communications: string[];
   owner: string;
+  proxy_url?: string;
+  proxy_port?: number;
 }
 
 export interface BackendMetrics {

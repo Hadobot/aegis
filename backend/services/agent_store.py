@@ -41,7 +41,9 @@ def get_all() -> List[dict]:
 def upsert(agent_id: str, agent_data: dict):
     with _lock:
         agents = load_all()
-        agents[agent_id] = agent_data
+        existing = agents.get(agent_id, {})
+        merged = {**existing, **agent_data}
+        agents[agent_id] = merged
         save_all(agents)
 
 

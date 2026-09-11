@@ -1,0 +1,7 @@
+{
+  "agent1": 8001,
+  "research-bot": 8001,
+  "code-reviewer": 8002,
+  "customer-research-agent": 8003,
+  "feedback-agent": 8004
+}

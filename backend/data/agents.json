@@ -1,0 +1,76 @@
+{
+  "research-bot": {
+    "agent_id": "research-bot",
+    "name": "Research Bot",
+    "description": "Summarizes documents and answers research queries",
+    "autonomy_level": 2,
+    "allowed_tools": [
+      "sentry",
+      "shield",
+      "intel",
+      "auditor",
+      "router"
+    ],
+    "allowed_communications": [],
+    "owner": "researhc and development team",
+    "endpoint": "https://api.company.com/research",
+    "context": "",
+    "proxy_url": "http://localhost:8001/v1",
+    "proxy_port": 8001
+  },
+  "code-reviewer": {
+    "agent_id": "code-reviewer",
+    "name": "Code Reviewer",
+    "description": "",
+    "autonomy_level": 2,
+    "allowed_tools": [
+      "sentry",
+      "shield",
+      "intel",
+      "auditor",
+      "router"
+    ],
+    "allowed_communications": [],
+    "owner": "Demo Team",
+    "endpoint": "https://api.company.com/reviewer",
+    "context": "Follows OWASP guidelines",
+    "proxy_url": "http://localhost:8002/v1",
+    "proxy_port": 8002
+  },
+  "customer-research-agent": {
+    "agent_id": "customer-research-agent",
+    "name": "Customer Research Agent",
+    "description": "Handles customer inquiry analysis, trend detection, and generates insights from support tickets and feedback data for the operations team",
+    "autonomy_level": 2,
+    "allowed_tools": [
+      "sentry",
+      "shield",
+      "auditor",
+      "router"
+    ],
+    "allowed_communications": [],
+    "owner": "Operations team",
+    "endpoint": " https://agent.company.com",
+    "context": "his agent processes customer support tickets, feedback forms, and chat transcripts to identify recurring issues and sentiment trends. It has read-only access to the customer database and can generate summary reports. It must never share customer PII with external APIs, never modify production databases, and always route escalated complaints to a human agent. Approved behaviors: read tickets, aggregate metrics, generate CSV exports. Restricted: no financial data access, no account modifications.",
+    "proxy_url": "http://localhost:8003/v1",
+    "proxy_port": 8003
+  },
+  "feedback-agent": {
+    "agent_id": "feedback-agent",
+    "name": "Feedback Agent",
+    "description": "andles customer inquiry analysis, trend detection, and generates insights from support tickets and feedback data for the operations team",
+    "autonomy_level": 2,
+    "allowed_tools": [
+      "sentry",
+      "shield",
+      "auditor",
+      "router"
+    ],
+    "allowed_communications": [],
+    "owner": "Operations Team",
+    "endpoint": "https://agent.company.com",
+    "context": "This agent processes customer support tickets, feedback forms, and chat transcripts to identify recurring issues and sentiment trends. It has read-only access to the customer database and can generate summary reports. It must never share customer PII with external APIs, never modify production databases, and always route escalated complaints to a human agent. Approved behaviors: read tickets, aggregate metrics, generate CSV exports. Restricted: no financial data access, no account modifications.",
+    "proxy_url": "http://localhost:8004/v1",
+    "proxy_port": 8004
+  }
+}

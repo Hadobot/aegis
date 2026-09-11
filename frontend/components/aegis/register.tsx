@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { Check, Plus } from 'lucide-react'
+import { Check, Plus, Copy } from 'lucide-react'
 import type { View, GovernanceConfig } from '@/src/aegis/view-types'
 import type { Agent } from '@/src/types'
 import { emptyGovernance, governanceModules } from '@/src/aegis/view-types'
@@ -19,6 +19,8 @@ export function RegisterView({ onNavigate }: { onNavigate: (view: View) => void 
   const [registered, setRegistered] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [proxyUrl, setProxyUrl] = useState('')
+  const [copiedUrl, setCopiedUrl] = useState(false)
 
   const toggle = (key: keyof GovernanceConfig) =>
     setGovernance((current) => ({ ...current, [key]: !current[key] }))
@@ -28,7 +30,7 @@ export function RegisterView({ onNavigate }: { onNavigate: (view: View) => void 
     setSubmitting(true)
     setError(null)
     try {
-      await agentService.registerAgent({
+      const result = await agentService.registerAgent({
         name,
         endpoint,
         description,
@@ -42,11 +44,20 @@ export function RegisterView({ onNavigate }: { onNavigate: (view: View) => void 
         routerEnabled: governance.router,
         context,
       } as Omit<Agent, 'id'> & { context: string })
+      setProxyUrl(result.proxyUrl || '')
       setRegistered(true)
     } catch (e) {
       setError('Registration failed. Make sure the backend is running.')
     } finally {
       setSubmitting(false)
+    }
+  }
+
+  const copyProxyUrl = () => {
+    if (proxyUrl) {
+      navigator.clipboard.writeText(proxyUrl)
+      setCopiedUrl(true)
+      setTimeout(() => setCopiedUrl(false), 2000)
     }
   }
 
@@ -57,6 +68,18 @@ export function RegisterView({ onNavigate }: { onNavigate: (view: View) => void 
         <span className="section-kicker text-emerald-300">Registration complete</span>
         <h2>{name} is now registered</h2>
         <p>Its context and selected governance modules are ready for runtime use.</p>
+        {proxyUrl && (
+          <div className="proxy-success-box">
+            <span className="section-kicker">Your agent proxy</span>
+            <div className="proxy-url-display">
+              <code>{proxyUrl}</code>
+              <button onClick={copyProxyUrl} className="proxy-copy-btn" title="Copy proxy URL">
+                {copiedUrl ? <Check size={14} /> : <Copy size={14} />}
+              </button>
+            </div>
+            <small>Point your agent&apos;s LLM base URL to this endpoint for governed access.</small>
+          </div>
+        )}
         <Button onClick={() => onNavigate('agents')}>View registered agents</Button>
       </div>
     )
@@ -68,7 +91,7 @@ export function RegisterView({ onNavigate }: { onNavigate: (view: View) => void 
         <div>
           <span className="section-kicker">New runtime connection</span>
           <h2>Register an agent</h2>
-          <p>Define this agent&apos;s identity, context, and governance modules.</p>
+          <p>Define this agent&apos;s identity, context, and governance modules. A unique proxy will be created automatically.</p>
         </div>
       </div>
       <div className="form-panel">

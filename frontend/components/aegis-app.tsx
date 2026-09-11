@@ -6,6 +6,7 @@ import type { View } from '@/src/aegis/view-types'
 import { AuditView } from './aegis/audit'
 import { AgentsView } from './aegis/agents'
 import { CombosView } from './aegis/combos'
+import { ComboMonitorView } from './aegis/combo-monitor'
 import { Overview } from './aegis/overview'
 import { RegisterView } from './aegis/register'
 import { EscalationsView } from './aegis/escalations'
@@ -43,6 +44,7 @@ export default function AegisApp() {
             {view === 'agents' && <AgentsView key={agentRefreshKey} onNavigate={navigate} onSelect={setSelectedAgent} />}
             {view === 'register' && <RegisterView onNavigate={navigate} />}
             {view === 'combos' && <CombosView />}
+            {view === 'combo-monitor' && <ComboMonitorView />}
             {view === 'audit' && <AuditView onSelect={setSelectedEvent} />}
             {view === 'escalations' && <EscalationsView />}
           </main>
@@ -99,6 +101,17 @@ export default function AegisApp() {
               <span className="section-kicker">Autonomy level</span>
               <p className="mt-1 text-sm">Level {selectedAgent.autonomyLevel}</p>
             </div>
+            {selectedAgent.proxyUrl && (
+              <div className="mt-4">
+                <span className="section-kicker">Proxy URL</span>
+                <div className="proxy-url-display drawer-proxy">
+                  <code>{selectedAgent.proxyUrl}</code>
+                </div>
+                {selectedAgent.proxyPort && (
+                  <p className="mt-1 text-xs text-[var(--muted)]">Port: {selectedAgent.proxyPort}</p>
+                )}
+              </div>
+            )}
             <div className="mt-4">
               <span className="section-kicker">Governance modules</span>
               <div className="module-tags mt-2">

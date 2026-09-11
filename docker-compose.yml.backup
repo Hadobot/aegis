@@ -16,6 +16,12 @@ services:
     ports:
       - "8000:8000"
     environment:
+      - UPSTREAM_LLM_BASE_URL=${UPSTREAM_LLM_BASE_URL}
+      - UPSTREAM_LLM_API_KEY=${UPSTREAM_LLM_API_KEY}
+      - OPENROUTER_DEFAULT_MODEL=${OPENROUTER_DEFAULT_MODEL}
+      - INTERNAL_LLM_API_KEY=${INTERNAL_LLM_API_KEY}
+      - INTERNAL_LLM_BASE_URL=${INTERNAL_LLM_BASE_URL}
+      - INTERNAL_LLM_MODEL=${INTERNAL_LLM_MODEL}
       - QDRANT_HOST=qdrant
       - QDRANT_PORT=6333
       - ENVIRONMENT=development
@@ -38,4 +44,3 @@ services:
 
 volumes:
   qdrant_data:
-

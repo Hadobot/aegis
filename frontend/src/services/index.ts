@@ -13,6 +13,9 @@ import type {
   BackendMetrics,
   BackendAgentDetail,
   Escalation,
+  ComboViolation,
+  ComboMonitorStatus,
+  AgentDiscovery,
 } from '@/src/types';
 import * as fixtures from '@/src/fixtures';
 import { apiFetch, ApiError } from '@/src/lib/api';
@@ -26,6 +29,8 @@ export const agentService = {
       autonomy_level: number;
       owner: string;
       allowed_tools: string[];
+      proxy_url?: string;
+      proxy_port?: number;
     }> }>('/api/v1/agents');
     return data.agents.map((a) => ({
       id: a.agent_id,
@@ -39,12 +44,19 @@ export const agentService = {
       intelEnabled: a.allowed_tools.includes('intel'),
       auditorEnabled: a.allowed_tools.includes('auditor'),
       routerEnabled: a.allowed_tools.includes('router'),
+      proxyUrl: a.proxy_url || '',
+      proxyPort: a.proxy_port || 0,
     }));
   },
 
-  async registerAgent(agent: Omit<Agent, 'id'>): Promise<Agent> {
+  async registerAgent(agent: Omit<Agent, 'id'> & { context?: string }): Promise<Agent & { proxyUrl: string }> {
     const id = agent.name.toLowerCase().replace(/\s+/g, '-');
-    await apiFetch('/api/v1/agents/register', {
+    const data = await apiFetch<{
+      registered: boolean;
+      agent_id: string;
+      proxy_url: string;
+      proxy_port: number;
+    }>('/api/v1/agents/register', {
       method: 'POST',
       body: JSON.stringify({
         agent_id: id,
@@ -61,15 +73,32 @@ export const agentService = {
         allowed_communications: [],
         owner: agent.owner || '',
         endpoint: agent.endpoint || '',
-        context: (agent as Record<string, unknown>).context || '',
+        context: agent.context || '',
       }),
     });
-    return { ...agent, id };
+    return { ...agent, id, proxyUrl: data.proxy_url };
   },
 
   async getAgentById(id: string): Promise<BackendAgentDetail | null> {
     try {
       return await apiFetch<BackendAgentDetail>(`/api/v1/agents/${id}`);
+    } catch {
+      return null;
+    }
+  },
+
+  async discoverAgents(): Promise<AgentDiscovery[]> {
+    try {
+      const data = await apiFetch<{ agents: AgentDiscovery[] }>('/api/v1/agents/discover');
+      return data.agents;
+    } catch {
+      return [];
+    }
+  },
+
+  async discoverAgent(id: string): Promise<AgentDiscovery | null> {
+    try {
+      return await apiFetch<AgentDiscovery>(`/api/v1/agents/discover/${id}`);
     } catch {
       return null;
     }
@@ -184,6 +213,7 @@ export const comboService = {
         description: string;
         agents: string[];
         connections: unknown[];
+        monitoring_mode?: string;
         status: string;
         createdAt: string;
       }> }>('/api/v1/combos');
@@ -193,6 +223,7 @@ export const comboService = {
         description: c.description,
         agents: c.agents,
         connections: c.connections as Combo['connections'],
+        monitoringMode: (c.monitoring_mode || 'enforce') as Combo['monitoringMode'],
         status: c.status as Combo['status'],
         createdAt: new Date(c.createdAt),
       }));
@@ -209,6 +240,7 @@ export const comboService = {
         description: string;
         agents: string[];
         connections: unknown[];
+        monitoring_mode?: string;
         status: string;
         createdAt: string;
       }>(`/api/v1/combos/${id}`);
@@ -218,6 +250,7 @@ export const comboService = {
         description: c.description,
         agents: c.agents,
         connections: c.connections as Combo['connections'],
+        monitoringMode: (c.monitoring_mode || 'enforce') as Combo['monitoringMode'],
         status: c.status as Combo['status'],
         createdAt: new Date(c.createdAt),
       };
@@ -235,6 +268,7 @@ export const comboService = {
       description: string;
       agents: string[];
       connections: unknown[];
+      monitoring_mode?: string;
       status: string;
       createdAt: string;
     }>('/api/v1/combos', {
@@ -244,6 +278,7 @@ export const comboService = {
         description: combo.description,
         agents: combo.agents,
         connections: combo.connections,
+        monitoring_mode: combo.monitoringMode || 'enforce',
       }),
     });
     return {
@@ -252,9 +287,46 @@ export const comboService = {
       description: data.description,
       agents: data.agents,
       connections: data.connections as Combo['connections'],
+      monitoringMode: (data.monitoring_mode || 'enforce') as Combo['monitoringMode'],
       status: data.status as Combo['status'],
       createdAt: new Date(data.createdAt),
     };
+  },
+
+  async updateCombo(id: string, combo: Partial<Combo>): Promise<Combo | null> {
+    try {
+      const data = await apiFetch<{
+        id: string;
+        name: string;
+        description: string;
+        agents: string[];
+        connections: unknown[];
+        monitoring_mode?: string;
+        status: string;
+        createdAt: string;
+      }>(`/api/v1/combos/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          name: combo.name,
+          description: combo.description,
+          agents: combo.agents,
+          connections: combo.connections,
+          monitoring_mode: combo.monitoringMode,
+        }),
+      });
+      return {
+        id: data.id,
+        name: data.name,
+        description: data.description,
+        agents: data.agents,
+        connections: data.connections as Combo['connections'],
+        monitoringMode: (data.monitoring_mode || 'enforce') as Combo['monitoringMode'],
+        status: data.status as Combo['status'],
+        createdAt: new Date(data.createdAt),
+      };
+    } catch {
+      return null;
+    }
   },
 
   async deleteCombo(id: string): Promise<boolean> {
@@ -263,6 +335,78 @@ export const comboService = {
       return true;
     } catch {
       return false;
+    }
+  },
+};
+
+export const comboMonitorService = {
+  async getViolations(comboId?: string): Promise<ComboViolation[]> {
+    try {
+      const query = comboId ? `?combo_id=${comboId}` : '';
+      const data = await apiFetch<{ violations: ComboViolation[]; total: number }>(
+        `/api/v1/combo-monitor/violations${query}`
+      );
+      return data.violations;
+    } catch {
+      return [];
+    }
+  },
+
+  async getMonitorStatus(): Promise<ComboMonitorStatus | null> {
+    try {
+      return await apiFetch<ComboMonitorStatus>('/api/v1/combo-monitor/status');
+    } catch {
+      return null;
+    }
+  },
+
+  async getActiveCombos(): Promise<ComboMonitorStatus['combos']> {
+    try {
+      const data = await apiFetch<{ combos: ComboMonitorStatus['combos'] }>('/api/v1/combo-monitor/active');
+      return data.combos;
+    } catch {
+      return [];
+    }
+  },
+
+  async validateCommunication(payload: {
+    from_agent_id: string;
+    to_agent_id: string;
+    combo_id: string;
+    data_flow?: string;
+    action?: string;
+  }): Promise<{
+    allowed: boolean;
+    reason: string;
+    monitoring_mode: string;
+    violated_rules: string[];
+  }> {
+    try {
+      return await apiFetch('/api/v1/combo-monitor/validate', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+    } catch {
+      return { allowed: false, reason: 'Monitor service unavailable', monitoring_mode: 'enforce', violated_rules: [] };
+    }
+  },
+};
+
+export const proxyService = {
+  async getProxies(): Promise<Record<string, { agent_id: string; port: number; proxy_url: string; status: string }>> {
+    try {
+      const data = await apiFetch<{ proxies: Record<string, { agent_id: string; port: number; proxy_url: string; status: string }> }>('/api/v1/proxies');
+      return data.proxies;
+    } catch {
+      return {};
+    }
+  },
+
+  async restartProxy(agentId: string): Promise<{ agent_id: string; port: number; proxy_url: string; status: string } | null> {
+    try {
+      return await apiFetch(`/api/v1/proxies/${agentId}/restart`, { method: 'POST' });
+    } catch {
+      return null;
     }
   },
 };

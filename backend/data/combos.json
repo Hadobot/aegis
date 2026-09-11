@@ -1,0 +1,28 @@
+{
+  "combo-1789108363032": {
+    "id": "combo-1789108363032",
+    "name": "Resarch and Review",
+    "description": "Governs communication between research-bot and code-reviewer to ensure safe data flow and prevent unauthorized actions",
+    "agents": [
+      "research-bot",
+      "code-reviewer"
+    ],
+    "connections": [],
+    "monitoring_mode": "enforce",
+    "status": "active",
+    "createdAt": "2026-09-11T06:32:43.032293"
+  },
+  "combo-1789110009049": {
+    "id": "combo-1789110009049",
+    "name": "Research and Review",
+    "description": " Coordinates research-bot and code-reviewer to safely share findings and ensure reviewed outputs meet quality standards",
+    "agents": [
+      "research-bot",
+      "code-reviewer"
+    ],
+    "connections": [],
+    "monitoring_mode": "enforce",
+    "status": "active",
+    "createdAt": "2026-09-11T07:00:09.049403"
+  }
+}
